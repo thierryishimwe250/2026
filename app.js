@@ -25,42 +25,89 @@ async function getNews() {
         if (empty) empty.classList.add('hidden');
         if (errorState) errorState.classList.add('hidden');
 
+        console.log('Fetching articles from Supabase...');
+
         // Fetch articles from Supabase
         const { data, error } = await supabase
             .from('articles')
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (error) throw new Error(error.message);
+        // Enhanced error handling
+        if (error) {
+            console.error('Supabase fetch error:', {
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            throw new Error(`Failed to fetch articles: ${error.message}`);
+        }
 
-        // Hide loading
+        console.log('Articles fetched successfully:', data);
+
+        // Hide loading state
         if (loading) loading.classList.add('hidden');
 
         // Check if data exists
         if (!data || data.length === 0) {
+            console.log('No articles found in database');
             if (empty) empty.classList.remove('hidden');
             return;
         }
 
-        // Display articles
+        // Display articles - Map through data and create cards
         if (container) {
             container.innerHTML = '';
+            
             data.forEach(article => {
-                const card = createNewsCard(article);
-                container.appendChild(card);
+                try {
+                    const card = createNewsCard(article);
+                    container.appendChild(card);
+                } catch (cardError) {
+                    console.error('Error creating card for article:', article.id, cardError);
+                }
             });
+
+            console.log(`Successfully displayed ${data.length} articles`);
             container.classList.remove('hidden');
         }
+
     } catch (error) {
-        console.error('Error fetching news:', error);
+        console.error('Error in getNews function:', {
+            message: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+
+        // Update error display
         const errorState = document.getElementById('error-state');
         const errorMessage = document.getElementById('error-message');
+        const loading = document.getElementById('loading');
+
         if (errorState && errorMessage) {
-            errorMessage.textContent = `Failed to load news: ${error.message}`;
+            errorMessage.textContent = `❌ Failed to load news: ${error.message}`;
             errorState.classList.remove('hidden');
         }
-        if (document.getElementById('loading')) {
-            document.getElementById('loading').classList.add('hidden');
+
+        // Hide loading indicator
+        if (loading) {
+            loading.classList.add('hidden');
+        }
+
+        // Update loading element to show error
+        const loadingDiv = document.getElementById('loading');
+        if (loadingDiv) {
+            loadingDiv.innerHTML = `
+                <div class="text-center py-12">
+                    <p class="text-red-600 text-lg">⚠️ Error loading news</p>
+                    <p class="text-gray-500 text-sm mt-2">${error.message}</p>
+                    <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        Retry
+                    </button>
+                </div>
+            `;
+            loadingDiv.classList.remove('hidden');
         }
     }
 }
@@ -114,7 +161,9 @@ async function postNews(title, content, image_url) {
             throw new Error('Image URL is required');
         }
 
-        // Insert into Supabase
+        console.log('Posting article to Supabase...');
+
+        // Insert into Supabase with .select() for v2 compatibility
         const { data, error } = await supabase
             .from('articles')
             .insert([
@@ -123,15 +172,40 @@ async function postNews(title, content, image_url) {
                     content: content.trim(),
                     image_url: image_url.trim()
                 }
-            ]);
+            ])
+            .select(); // Required in Supabase v2 to return the inserted data
 
-        if (error) throw new Error(error.message);
+        // Enhanced error handling
+        if (error) {
+            console.error('Supabase insert error:', {
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            throw new Error(`Failed to post article: ${error.message}`);
+        }
 
-        // Success
-        console.log('Article posted successfully:', data);
+        console.log('Article posted successfully:', {
+            insertedData: data,
+            timestamp: new Date().toISOString()
+        });
+
+        // Success confirmation
+        if (data && data.length > 0) {
+            console.log('New article ID:', data[0].id);
+            console.log('Created at:', data[0].created_at);
+        }
+
         return data;
+
     } catch (error) {
-        console.error('Error posting news:', error);
+        console.error('Error in postNews function:', {
+            message: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString(),
+            inputData: { title: title?.substring(0, 20), content: content?.substring(0, 20) }
+        });
         throw error;
     }
 }
@@ -142,25 +216,31 @@ async function postNews(title, content, image_url) {
 
 // Format date as relative time (e.g., "2h ago")
 function formatDate(isoString) {
-    const date = new Date(isoString);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
+    try {
+        const date = new Date(isoString);
+        const now = new Date();
+        const seconds = Math.floor((now - date) / 1000);
 
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+        if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
 
-    // Fallback to formatted date
-    return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-    });
+        // Fallback to formatted date
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+        });
+    } catch (error) {
+        console.error('Error formatting date:', isoString, error);
+        return 'Unknown date';
+    }
 }
 
-// Escape HTML to prevent XSS
+// Escape HTML to prevent XSS attacks
 function escapeHtml(text) {
+    if (!text) return '';
     const map = {
         '&': '&amp;',
         '<': '&lt;',
@@ -174,11 +254,28 @@ function escapeHtml(text) {
 // ============================================
 // ERROR HANDLING
 // ============================================
+
+// Global error handler
 window.addEventListener('error', (event) => {
-    console.error('Global error:', event.error);
+    console.error('Global JavaScript error:', {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        error: event.error?.stack
+    });
 });
 
 // Handle unhandled promise rejections
 window.addEventListener('unhandledrejection', (event) => {
-    console.error('Unhandled rejection:', event.reason);
+    console.error('Unhandled promise rejection:', {
+        reason: event.reason,
+        promise: event.promise
+    });
+});
+
+// Log initialization
+console.log('Inkuru Zitangaje News Site Initialized', {
+    supabaseUrl: SUPABASE_URL,
+    timestamp: new Date().toISOString()
 });
